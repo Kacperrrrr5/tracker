@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MW tracker</title>
     
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta name="apple-mobile-web-app-title" content="MW Tracker">
+    <meta name="description" content="Śledzenie pociągów Metra Warszawskiego w czasie rzeczywistym">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     
@@ -16,6 +31,7 @@
             width: 100%;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             overflow: hidden;
+            background-color: #000000;
         }
 
         #app-container {
@@ -85,6 +101,44 @@
             margin-top: 0;
         }
 
+        #install-prompt {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 1000;
+            display: none;
+            align-items: center;
+            gap: 15px;
+        }
+
+        #install-prompt.show {
+            display: flex;
+        }
+
+        #install-prompt button {
+            background: #000;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #install-prompt button:hover {
+            background: #333;
+        }
+
+        #install-prompt .close {
+            background: transparent;
+            color: #666;
+            padding: 4px 8px;
+        }
     </style>
 </head>
 <body>
@@ -93,6 +147,12 @@
     <div id="error">
         <h3>Błąd wczytywania danych</h3>
         <p id="error-message"></p>
+    </div>
+
+    <div id="install-prompt">
+        <span>Zainstaluj aplikację na swoim urządzeniu</span>
+        <button id="install-button">Zainstaluj</button>
+        <button class="close" id="close-prompt">✕</button>
     </div>
 
     <div id="app-container">
@@ -105,14 +165,13 @@
         const svgUrl = 'mapunia.svg'; 
 
         const svgBounds = [
-    [52.11381-0.0051, 20.87874-0.010],  // Lewy dolny róg (SW)
-    [52.32977-0.0047, 21.14531-0.005]   // Prawy górny róg (NE)
-];
+            [52.11381-0.0051, 20.87874-0.010],
+            [52.32977-0.0047, 21.14531-0.005]
+        ];
         
         const zoomOffset = 2;
         const maxZoomLevel = 15;
 
-        // Pliki GTFS do wczytania
         const gtfsFiles = {
             stops: 'stops.txt',
             routes: 'routes.txt',
@@ -127,6 +186,36 @@
         let map;
         const db = {};
         const trainMarkers = {};
+        let deferredPrompt;
+
+        // PWA Install Prompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            document.getElementById('install-prompt').classList.add('show');
+        });
+
+        document.getElementById('install-button').addEventListener('click', async () => {
+            if (deferredPrompt) {
+                deferredPrompt.prompt();
+                const { outcome } = await deferredPrompt.userChoice;
+                deferredPrompt = null;
+                document.getElementById('install-prompt').classList.remove('show');
+            }
+        });
+
+        document.getElementById('close-prompt').addEventListener('click', () => {
+            document.getElementById('install-prompt').classList.remove('show');
+        });
+
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('service-worker.js')
+                    .then(registration => console.log('SW registered:', registration))
+                    .catch(err => console.log('SW registration failed:', err));
+            });
+        }
 
         function showError(message) {
             document.getElementById('loading').classList.add('hidden');
@@ -162,7 +251,6 @@
             const gtfsData = {};
             
             try {
-                // Wczytaj wszystkie pliki GTFS
                 for (const [key, filename] of Object.entries(gtfsFiles)) {
                     gtfsData[key] = await loadGTFSFile(filename);
                 }
@@ -175,10 +263,8 @@
         
         async function init() {
             try {
-                // Wczytaj dane GTFS z plików
                 const gtfsData = await loadAllGTFSData();
 
-                // Przetwórz stops
                 db.stops = parseCSV(gtfsData.stops).reduce((acc, stop) => {
                     acc[stop.stop_id] = {
                         id: stop.stop_id,
@@ -189,25 +275,16 @@
                     return acc;
                 }, {});
 
-                // Przetwórz routes
                 db.routes = parseCSV(gtfsData.routes).reduce((acc, route) => {
                     acc[route.route_id] = route;
                     return acc;
                 }, {});
 
-                // Przetwórz trips
                 db.trips = parseCSV(gtfsData.trips);
-
-                // Przetwórz stop_times
                 db.stop_times = parseCSV(gtfsData.stop_times);
-
-                // Przetwórz frequencies
                 db.frequencies = parseCSV(gtfsData.frequencies);
-
-                // Przetwórz calendar_dates
                 db.calendar_dates = parseCSV(gtfsData.calendar_dates);
                 
-                // Budowanie kształtów tras z stop_times
                 db.shapes = {};
                 
                 db.trips.forEach(trip => {
@@ -223,7 +300,6 @@
                     }
                 });
 
-                // Ukryj komunikat ładowania
                 document.getElementById('loading').classList.add('hidden');
 
                 initMap();
@@ -285,11 +361,8 @@
         function getServiceIdForToday() {
             const today = new Date();
             const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-            
-            // Znajdź service_id dla dzisiejszej daty
             const serviceForToday = db.calendar_dates.find(cd => cd.date === dateStr);
-            
-            return serviceForToday ? serviceForToday.service_id : 'PcM'; // domyślnie dzień powszedni
+            return serviceForToday ? serviceForToday.service_id : 'PcM';
         }
         
         function timeToSeconds(timeStr) {
@@ -330,7 +403,6 @@
             const activeTrains = [];
 
             db.frequencies.forEach(freq => {
-                // Sprawdź czy trip_id pasuje do aktualnego service_id
                 if (!freq.trip_id.includes(serviceId)) return;
 
                 const startTime = timeToSeconds(freq.start_time);
