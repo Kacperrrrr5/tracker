@@ -1,6 +1,6 @@
 {
-  "name": "MW Tracker",
-  "short_name": "MW Tracker",
+  "name": "Podziemie",
+  "short_name": "Podziemie",
   "description": "Śledzenie pociągów Metra Warszawskiego w czasie rzeczywistym",
   "start_url": "/",
   "display": "standalone",
