@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mapa Metra Warszawskiego - Tracker na SVG</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+        }
+
+        #app-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        #map {
+            flex-grow: 1;
+            height: 100%;
+            background-color: #000000; /* Kolor tła na czas ładowania */
+        }
+        
+        .train-icon {
+            border-radius: 50%;
+            color: white;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            line-height: 20px;
+            width: 20px;
+            height: 20px;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.7);
+            border: 2px solid white;
+        }
+        .train-icon.m1 { background-color: #0055a5; }
+        .train-icon.m2 { background-color: #d82329; }
+
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <main id="map"></main>
+    </div>
+
+    <script>
+        // --- KONFIGURACJA UŻYTKOWNIKA ---
+
+        // 1. Podaj nazwę swojego pliku SVG
+        const svgUrl = 'mapara.svg'; 
+
+        // 2. Ustaw współrzędne geograficzne dla narożników SVG
+        const svgBounds = [
+            [52.13, 20.8745], // Narożnik południowo-zachodni (dolny-lewy)
+            [52.34, 21.1055]  // Narożnik północno-wschodni (górny-prawy)
+        ];
+        
+        // 3. Ustaw modyfikator przybliżenia (0 = wypełnij ekran, 1 = przybliż, -1 = oddal)
+        const zoomOffset = 2;
+
+        // 4. Ustaw MAKSYMALNY poziom przybliżenia (np. 18)
+        const maxZoomLevel = 15;
+
+
+        // --- Koniec konfiguracji ---
+
+
+        // Osadzone dane GTFS
+        const gtfsData = {
+            stops: `stop_id,stop_name,stop_lat,stop_lon
+1003M:P2,Dworzec Wileński,52.25415054468,21.03540122509
+1085M:P2,Bródno,52.29356,21.02907
+1137M:P2,Targówek Mieszkaniowy,52.26934493034,21.05137779772
+1140M:P2,Trocka,52.27526580809,21.0552978462
+1146M:P2,Kondratowicza,52.29208,21.05019
+1231M:P2,Stadion Narodowy,52.24696482859,21.0429006815
+1526M:P2,Szwedzka,52.26127493237,21.04169726372
+3282M:P2,Zacisze,52.28581,21.05036
+5005M:P2,Płocka,52.23290034882,20.9661784746
+5028M:P2,Młynów,52.23763991374,20.9604745212
+5030M:P2,Księcia Janusza,52.23909632355,20.94410954833
+5032M:P2,Ulrychów,52.24045,20.93001
+5034M:P2,Bemowo,52.23929,20.91502
+5040M:P2,Rondo Daszyńskiego,52.23001401486,20.98274409771
+6003M:P1,Politechnika,52.21985959085,21.01166665554
+6005M:P1,Centrum,52.22967406401,21.01167738438
+6006M:P1,Świętokrzyska,52.23565017042,21.00938439369
+6052M:P1,Ratusz Arsenał,52.24523956667,21.00222051144
+6055M:P1,Dworzec Gdański,52.25816913166,20.99313259125
+6059M:P1,Plac Wilsona,52.26760451458,20.9859251976
+7014M:P2,Nowy Świat-Uniwersytet,52.2397751939,21.01997315884
+7019M:P1,Pole Mokotowskie,52.21043360233,21.008451581
+7043M:P2,Świętokrzyska,52.23550085358,21.00938439369
+7079M:P2,Rondo ONZ,52.23287309971,21.00115060806
+7088M:P2,Centrum Nauki Kopernik,52.24233519842,21.02985680103
+7099M:P1,Racławicka,52.20120015562,21.00839853287
+A4,Słodowiec,52.27649,20.9754
+A5,Stare Bielany,52.28186,20.96863
+A6,Wawrzyszew,52.28825,20.96105
+A7,Młociny,52.29311,20.94273
+A9,Służew,52.17696,21.0287
+A10,Ursynów,52.16781,21.03362
+A11,Stokłosy,52.15933,21.03783
+A12,Imielin,52.151,21.0425
+A13,Natolin,52.14285,21.04944
+A14,Kabaty,52.13198,21.06517`,
+            routes: `route_id,route_short_name,route_color
+M1,M1,0054a5
+M2,M2,d8232a`,
+            trips: `trip_id,route_id,service_id,trip_headsign,direction_id
+M1:PcM:KAB,M1,PcM,Kabaty,1
+M1:PcM:MLO,M1,PcM,Młociny,0
+M2:PcM:BEM,M2,PcM,Bemowo,1
+M2:PcM:BRO,M2,PcM,Bródno,0`,
+            stop_times: `trip_id,stop_sequence,stop_id
+M1:PcM:MLO,0,A14,Kabaty
+M1:PcM:MLO,1,A13,Natolin
+M1:PcM:MLO,2,A12,Imielin
+M1:PcM:MLO,3,A11,Stokłosy
+M1:PcM:MLO,4,A10,Ursynów
+M1:PcM:MLO,5,A9,Służew
+M1:PcM:MLO,6,7099M:P1,Racławicka
+M1:PcM:MLO,7,7019M:P1,Pole Mokotowskie
+M1:PcM:MLO,8,6003M:P1,Politechnika
+M1:PcM:MLO,9,6005M:P1,Centrum
+M1:PcM:MLO,10,6006M:P1,Świętokrzyska
+M1:PcM:MLO,11,6052M:P1,Ratusz Arsenał
+M1:PcM:MLO,12,6055M:P1,Dworzec Gdański
+M1:PcM:MLO,13,6059M:P1,Plac Wilsona
+M1:PcM:MLO,14,A4,Słodowiec
+M1:PcM:MLO,15,A5,Stare Bielany
+M1:PcM:MLO,16,A6,Wawrzyszew
+M1:PcM:MLO,17,A7,Młociny
+M2:PcM:BRO,0,5034M:P2,Bemowo
+M2:PcM:BRO,1,5032M:P2,Ulrychów
+M2:PcM:BRO,2,5030M:P2,Księcia Janusza
+M2:PcM:BRO,3,5028M:P2,Młynów
+M2:PcM:BRO,4,5005M:P2,Płocka
+M2:PcM:BRO,5,5040M:P2,Rondo Daszyńskiego
+M2:PcM:BRO,6,7079M:P2,Rondo ONZ
+M2:PcM:BRO,7,7043M:P2,Świętokrzyska
+M2:PcM:BRO,8,7014M:P2,Nowy Świat-Uniwersytet
+M2:PcM:BRO,9,7088M:P2,Centrum Nauki Kopernik
+M2:PcM:BRO,10,1231M:P2,Stadion Narodowy
+M2:PcM:BRO,11,1003M:P2,Dworzec Wileński
+M2:PcM:BRO,12,1526M:P2,Szwedzka
+M2:PcM:BRO,13,1137M:P2,Targówek Mieszkaniowy
+M2:PcM:BRO,14,1140M:P2,Trocka
+M2:PcM:BRO,15,3282M:P2,Zacisze
+M2:PcM:BRO,16,1146M:P2,Kondratowicza
+M2:PcM:BRO,17,1085M:P2,Bródno`,
+            frequencies: `trip_id,start_time,end_time,headway_secs
+M1:PcM:KAB,05:00:00,05:50:00,270
+M1:PcM:KAB,05:50:00,09:23:00,150
+M1:PcM:KAB,09:23:00,13:58:00,270
+M1:PcM:KAB,13:58:00,18:50:00,150
+M1:PcM:KAB,18:50:00,20:00:00,300
+M1:PcM:KAB,20:00:00,24:12:50,450
+M1:PcM:MLO,05:00:00,06:21:00,270
+M1:PcM:MLO,06:21:00,09:21:00,150
+M1:PcM:MLO,09:21:00,14:26:00,270
+M1:PcM:MLO,14:26:00,18:24:00,150
+M1:PcM:MLO,18:24:00,19:35:00,300
+M1:PcM:MLO,19:35:00,23:38:00,450
+M1:PcM:MLO,23:38:00,24:06:59,510
+M2:PcM:BEM,05:00:00,05:31:00,390
+M2:PcM:BEM,05:31:00,06:59:00,270
+M2:PcM:BEM,06:59:00,09:32:00,180
+M2:PcM:BEM,09:32:00,14:24:00,270
+M2:PcM:BEM,14:24:00,19:30:00,180
+M2:PcM:BEM,19:30:00,20:42:00,300
+M2:PcM:BEM,20:42:00,24:13:59,540
+M2:PcM:BRO,05:00:00,05:59:00,390
+M2:PcM:BRO,05:59:00,06:22:00,270
+M2:PcM:BRO,06:22:00,09:20:00,180
+M2:PcM:BRO,09:20:00,14:21:00,450
+M2:PcM:BRO,14:21:00,19:01:00,180
+M2:PcM:BRO,19:01:00,20:10:00,300
+M2:PcM:BRO,20:10:00,24:06:59,480`,
+            calendar_dates: `date,service_id
+20251002,PcM`
+        };
+
+        let map;
+        const db = {};
+        const trainMarkers = {};
+
+        function parseCSV(text) {
+            const lines = text.trim().split('\n');
+            const header = lines.shift().split(',');
+            return lines.map(line => {
+                const values = line.split(',');
+                return header.reduce((obj, key, i) => {
+                    obj[key.trim()] = values[i].trim();
+                    return obj;
+                }, {});
+            });
+        }
+        
+        async function init() {
+            db.stops = parseCSV(gtfsData.stops).reduce((acc, stop) => {
+                acc[stop.stop_id] = {
+                    id: stop.stop_id,
+                    name: stop.stop_name,
+                    lat: parseFloat(stop.stop_lat),
+                    lon: parseFloat(stop.stop_lon)
+                };
+                return acc;
+            }, {});
+            db.routes = parseCSV(gtfsData.routes).reduce((acc, route) => {
+                acc[route.route_id] = route;
+                return acc;
+            }, {});
+            db.trips = parseCSV(gtfsData.trips);
+            db.stop_times = parseCSV(gtfsData.stop_times);
+            db.frequencies = parseCSV(gtfsData.frequencies);
+            
+            db.shapes = {};
+            const representativeTrips = { 'M1': 'M1:PcM:MLO', 'M2': 'M2:PcM:BRO' };
+            
+            for (const routeId in representativeTrips) {
+                const tripId = representativeTrips[routeId];
+                const stopsOnTrip = db.stop_times
+                    .filter(st => st.trip_id.startsWith(tripId))
+                    .sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence))
+                    .map(st => db.stops[st.stop_id]);
+                
+                db.shapes[routeId + ':0'] = stopsOnTrip;
+                db.shapes[routeId + ':1'] = [...stopsOnTrip].reverse();
+            }
+
+            initMap();
+            
+            updateTrains();
+            setInterval(updateTrains, 500);
+        }
+
+        function initMap() {
+            map = L.map('map', {
+                maxBounds: svgBounds,
+                maxBoundsViscosity: 1.0
+            });
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO',
+                opacity: 0
+            }).addTo(map);
+
+            map.createPane('svgPane');
+            map.getPane('svgPane').style.zIndex = 250;
+
+            L.imageOverlay(svgUrl, svgBounds, {
+                pane: 'svgPane',
+                interactive: true
+            }).addTo(map);
+
+            for (const shapeId in db.shapes) {
+                const routeId = shapeId.split(':')[0];
+                const route = db.routes[routeId];
+                const coordinates = db.shapes[shapeId].map(stop => [stop.lat, stop.lon]);
+                L.polyline(coordinates, { color: `#${route.route_color}`, weight: 6, opacity: 0.8 }).addTo(map);
+            }
+
+            for (const stopId in db.stops) {
+                const stop = db.stops[stopId];
+                L.circleMarker([stop.lat, stop.lon], {
+                    radius: 7,
+                    color: '#333',
+                    fillColor: '#fff',
+                    fillOpacity: 1,
+                    weight: 2
+                }).addTo(map).bindTooltip(stop.name);
+            }
+            
+            const center = L.latLngBounds(svgBounds).getCenter();
+            const baseZoom = map.getBoundsZoom(svgBounds);
+            const initialZoom = baseZoom + zoomOffset;
+            
+            map.setView(center, initialZoom);
+            map.setMinZoom(initialZoom);
+            
+            // NOWA LINIA: Ustawienie maksymalnego przybliżenia
+            map.setMaxZoom(maxZoomLevel);
+        }
+
+        function getServiceIdForToday() { return 'PcM'; }
+        
+        function timeToSeconds(timeStr) {
+            const [h, m, s] = timeStr.split(':').map(Number);
+            return h * 3600 + m * 60 + s;
+        }
+
+        function calculateTrainPosition(train) {
+            const shape = db.shapes[`${train.line}:${train.direction}`];
+            if (!shape) return null;
+
+            const DURATION_PER_SEGMENT = 150, DURATION_STOP = 35;         
+            const DURATION_TRAVEL = DURATION_PER_SEGMENT - DURATION_STOP; 
+
+            const segmentsElapsed = train.elapsed / DURATION_PER_SEGMENT;
+            const stopIndex = Math.floor(segmentsElapsed);
+
+            if (stopIndex >= shape.length - 1) return null;
+
+            const currentStop = shape[stopIndex];
+            const nextStop = shape[stopIndex + 1];
+            const timeIntoSegment = train.elapsed % DURATION_PER_SEGMENT;
+
+            let segmentProgress = (timeIntoSegment < DURATION_TRAVEL) ? (timeIntoSegment / DURATION_TRAVEL) : 1.0;
+
+            const lat = currentStop.lat + (nextStop.lat - currentStop.lat) * segmentProgress;
+            const lon = currentStop.lon + (nextStop.lon - currentStop.lon) * segmentProgress;
+
+            return { lat, lon };
+        }
+
+        function updateTrains() {
+            const now = new Date();
+            const secondsSinceMidnight = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+            const serviceId = getServiceIdForToday();
+            
+            const activeTrains = [];
+
+            db.frequencies
+                .filter(f => f.trip_id.includes(serviceId))
+                .forEach(freq => {
+                    const startTime = timeToSeconds(freq.start_time);
+                    const endTime = timeToSeconds(freq.end_time);
+                    const headway = parseInt(freq.headway_secs);
+
+                    if (secondsSinceMidnight >= startTime && secondsSinceMidnight <= endTime) {
+                        for (let t = startTime; t < endTime; t += headway) {
+                            const elapsed = secondsSinceMidnight - t;
+                            if (elapsed >= 0) {
+                                const tripInfo = db.trips.find(trip => trip.trip_id === freq.trip_id);
+                                if(tripInfo) {
+                                    activeTrains.push({
+                                        id: `${tripInfo.route_id}-${tripInfo.direction_id}-${t}`,
+                                        line: tripInfo.route_id,
+                                        headsign: tripInfo.trip_headsign,
+                                        direction: tripInfo.direction_id,
+                                        elapsed: elapsed
+                                    });
+                                }
+                            }
+                        }
+                    }
+                });
+
+            updateMap(activeTrains);
+        }
+        
+        function updateMap(trains) {
+            const activeTrainIds = new Set();
+            
+            trains.forEach(train => {
+                const position = calculateTrainPosition(train);
+                if (!position) return;
+                
+                activeTrainIds.add(train.id);
+
+                const iconHtml = `<div class="train-icon ${train.line.toLowerCase()}">${train.line}</div>`;
+                const customIcon = L.divIcon({
+                    html: iconHtml,
+                    className: '',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+
+                if (trainMarkers[train.id]) {
+                    trainMarkers[train.id].setLatLng([position.lat, position.lon]);
+                } else {
+                    trainMarkers[train.id] = L.marker([position.lat, position.lon], { icon: customIcon })
+                        .addTo(map)
+                        .bindTooltip(`Pociąg do: ${train.headsign}`);
+                }
+            });
+            
+            for (const trainId in trainMarkers) {
+                if (!activeTrainIds.has(trainId)) {
+                    map.removeLayer(trainMarkers[trainId]);
+                    delete trainMarkers[trainId];
+                }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
